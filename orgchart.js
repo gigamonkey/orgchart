@@ -88,7 +88,7 @@
   };
 
   //
-  // Main renderig function.
+  // Main rendering function.
   //
 
   function renderOrgchart(orgAtDates) {
