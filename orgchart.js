@@ -1,70 +1,71 @@
 (function() {
-  function go() {
-    //
-    // Org type used for building up the org as people move around.
-    //
+  //
+  // Org type used for building up the org as people move around.
+  //
 
-    function Org() {
-      this.nodes = {};
+  function Org() {
+    this.nodes = {};
+  }
+
+  Org.prototype.update = function(name, old_boss, boss) {
+    if (old_boss in this.nodes) {
+      old = this.nodes[old_boss];
+      old.children = old.children.filter(c => c.name != name);
+    }
+    if (boss === "LEFT") {
+      delete this.nodes[name];
+    } else {
+      this.ensure(boss).children.push(this.ensure(name));
+    }
+  };
+
+  Org.prototype.ensure = function(name) {
+    if (!(name in this.nodes)) {
+      this.nodes[name] = { name: name, children: [] };
+    }
+    return this.nodes[name];
+  };
+
+  Org.prototype.root = function() {
+    let no_bosses = new Set(Object.keys(this.nodes));
+    for (const node of Object.values(this.nodes)) {
+      for (const report of node.children) {
+        no_bosses.delete(report.name);
+      }
+    }
+    if (no_bosses.size > 1) {
+      throw new Error("too many roots: " + [...no_bosses]);
+    }
+    if (no_bosses.size == 0) {
+      throw new Error("No, root! Everyone has a boss.");
     }
 
-    Org.prototype.update = function(name, old_boss, boss) {
-      if (old_boss in this.nodes) {
-        old = this.nodes[old_boss];
-        old.children = old.children.filter(c => c.name != name);
-      }
-      if (boss === "LEFT") {
-        delete this.nodes[name];
-      } else {
-        this.ensure(boss).children.push(this.ensure(name));
-      }
-    };
+    // Quick and dirty clone: all our values are maps, lists, and
+    // strings.
+    return JSON.parse(JSON.stringify(this.nodes[[...no_bosses][0]]));
+  };
 
-    Org.prototype.ensure = function(name) {
-      if (!(name in this.nodes)) {
-        this.nodes[name] = { name: name, children: [] };
-      }
-      return this.nodes[name];
-    };
+  Org.prototype.on_date = function(date) {
+    return { date: date, ...this.root() };
+  };
 
-    Org.prototype.root = function() {
-      let no_bosses = new Set(Object.keys(this.nodes));
-      for (const node of Object.values(this.nodes)) {
-        for (const report of node.children) {
-          no_bosses.delete(report.name);
-        }
-      }
-      if (no_bosses.size > 1) {
-        throw new Error("too many roots: " + [...no_bosses]);
-      }
-      if (no_bosses.size == 0) {
-        throw new Error("No, root! Everyone has a boss.");
-      }
+  Org.orgs = function(history) {
+    let bosses = {};
+    let org = new Org();
+    let orgs = [];
 
-      // Quick and dirty clone: all our values are maps, lists, and
-      // strings.
-      return JSON.parse(JSON.stringify(this.nodes[[...no_bosses][0]]));
-    };
-
-    Org.prototype.on_date = function(date) {
-      return { date: date, ...this.root() };
-    };
-
-    Org.orgs = function(history) {
-      let bosses = {};
-      let org = new Org();
-      let orgs = [];
-
-      for (const date of Object.keys(history).sort()) {
-        for (const change of history[date]) {
-          let [name, boss] = change.split("->").map(x => x.trim());
-          org.update(name, bosses[name], boss);
-          bosses[name] = boss;
-        }
-        orgs.push(org.on_date(date));
+    for (const date of Object.keys(history).sort()) {
+      for (const change of history[date]) {
+        let [name, boss] = change.split("->").map(x => x.trim());
+        org.update(name, bosses[name], boss);
+        bosses[name] = boss;
       }
-      return orgs;
-    };
+      orgs.push(org.on_date(date));
+    }
+    return orgs;
+  };
+
+  function go() {
 
     let orgAtDates = Org.orgs(window.org_history);
 
@@ -275,7 +276,7 @@
     function countPeople(org) {
       let c = 1;
       for (const child of org.children) {
-        c += countPeople(child)
+        c += countPeople(child);
       }
       return c;
     }
@@ -283,7 +284,7 @@
     function showOrg(i) {
       currentOrg = orgAtDates[i];
 
-      showDateAndCount(currentOrg)
+      showDateAndCount(currentOrg);
 
       let org = d3.hierarchy(currentOrg);
       org.x0 = height / 2;
@@ -297,9 +298,7 @@
       let fmt = d3.timeFormat("%B %-d, %Y");
       let count = countPeople(currentOrg);
 
-      dateLabel.text(
-        fmt(dateParser(org.date)) + " (" + count + " people)"
-      );
+      dateLabel.text(fmt(dateParser(org.date)) + " (" + count + " people)");
     }
 
     function findCurrentOrgIndex(orgAtDates) {
@@ -307,7 +306,7 @@
       let index = -1;
       for (let i = 0; i < orgAtDates.length; i++) {
         if (dateParser(orgAtDates[i].date) < now) {
-          index = i
+          index = i;
         }
       }
       return index == -1 ? orgAtDates.length - 1 : index;
@@ -324,9 +323,10 @@
     }
 
     setupTimeline(orgAtDates);
-    showOrg(findCurrentOrgIndex(orgAtDates))
+    showOrg(findCurrentOrgIndex(orgAtDates));
     document.addEventListener("keydown", changeOrg, false);
   }
 
   document.addEventListener("DOMContentLoaded", go);
+
 })();
