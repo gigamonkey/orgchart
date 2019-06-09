@@ -1,4 +1,26 @@
 (function() {
+  // Parser for the dates in org_history.js.
+  let dateParser = d3.timeParse("%Y-%m-%d");
+
+  // Closure to assign ids to nodes. Will break if two people have the
+  // same name. Which is kind of inherent in the current input data as
+  // there's no way to distinguish between a new person with the same
+  // name as an existing person or an existing person changing
+  // managers.
+  let assignId = (function() {
+    let id_counter = 1;
+    let ids = {};
+
+    return function(d) {
+      let name = d.data.name;
+      if (!ids[name]) {
+        ids[name] = id_counter++;
+      }
+      d.id = ids[name];
+      return d.id;
+    };
+  })();
+
   //
   // Org type used for building up the org as people move around.
   //
@@ -41,7 +63,7 @@
     }
 
     // Quick and dirty clone: all our values are maps, lists, and
-    // strings.
+    // strings so this is fine if not the most elegant.
     return JSON.parse(JSON.stringify(this.nodes[[...no_bosses][0]]));
   };
 
@@ -65,10 +87,11 @@
     return orgs;
   };
 
-  function go() {
+  //
+  // Main renderig function.
+  //
 
-    let orgAtDates = Org.orgs(window.org_history);
-
+  function renderOrgchart(orgAtDates) {
     let chart = document.getElementById("chart");
 
     let size = {
@@ -87,13 +110,6 @@
       .tree()
       .size([height - (roomForAxis + axisPadding), width - leftTreePadding]);
 
-    let diagonal = d3
-      .linkHorizontal()
-      .x(d => d.y)
-      .y(d => d.x);
-
-    let dateParser = d3.timeParse("%Y-%m-%d");
-
     let xScale = d3
       .scaleTime()
       .domain([
@@ -101,8 +117,6 @@
         d3.max(orgAtDates, d => dateParser(d.date))
       ])
       .range([0, width - (margin.left + margin.right)]);
-
-    let xAxis = d3.axisBottom(xScale);
 
     let svg = d3
       .select("#chart")
@@ -124,209 +138,195 @@
       .attr("y", 20)
       .attr("class", "datelabel");
 
-    d3.select("#chart")
-      .select("svg")
+    svg
       .append("g")
       .attr("id", "timeline")
       .attr(
         "transform",
         "translate(" + margin.left + "," + (height - roomForAxis) + ")"
       )
-      .call(xAxis);
-
-    let assignId = (function() {
-      let id_counter = 1;
-      let ids = {};
-
-      return function(d) {
-        let name = d.data.name;
-        if (!ids[name]) {
-          ids[name] = id_counter++;
-        }
-        d.id = ids[name];
-        return d.id;
-      };
-    })();
-
-    let currentOrg = null;
-
-    function updateTree(root, duration) {
-      setupNodes(root, duration);
-      setupLinks(root, duration);
-    }
-
-    function setupNodes(root, duration) {
-      let nodeData = root.descendants();
-      nodeData.forEach(function(d) {
-        d.y = d.depth * 200;
-      });
-      let nodes = gTree.selectAll("g.node").data(nodeData, assignId);
-
-      let enter = nodes
-        .enter()
-        .append("g")
-        .attr("class", "node")
-        .attr("transform", d => "translate(" + root.y0 + "," + root.x0 + ")");
-
-      enter
-        .append("circle")
-        .attr("r", 1e-6)
-        .style("fill", d => (d._children ? "lightsteelblue" : "#fff"));
-
-      enter
-        .append("text")
-        .attr("dy", ".35em")
-        .attr("x", d => (d.children || d._children ? -10 : 10))
-        .attr("text-anchor", d => (d.children || d._children ? "end" : "start"))
-        .text(d => d.data.name);
-
-      let update = enter.merge(nodes);
-
-      update
-        .transition()
-        .duration(duration)
-        .attr("transform", d => "translate(" + d.y + "," + d.x + ")");
-
-      update.select("circle").attr("r", 4.5);
-
-      update
-        .select("text")
-        .attr("x", d => (d.children || d._children ? -10 : 10))
-        .attr("text-anchor", d => (d.children || d._children ? "end" : "start"))
-        .style("fill-opacity", 1);
-
-      nodes
-        .exit()
-        .transition()
-        .duration(duration)
-        .attr("transform", d => "translate(" + root.y + "," + root.x + ")")
-        .remove();
-
-      nodeData.forEach(function(d) {
-        d.x0 = d.x;
-        d.y0 = d.y;
-      });
-    }
-
-    function setupLinks(root, duration) {
-      let links = gTree
-        .selectAll("path.link")
-        .data(root.descendants().slice(1), d => d.id);
-
-      let enter = links
-        .enter()
-        .insert("path", "g")
-        .attr("class", "link")
-        .attr("d", d => collapse(root.x0, root.y0));
-
-      enter
-        .merge(links)
-        .transition()
-        .duration(duration)
-        .attr("d", d => diagonal({ source: d, target: d.parent }));
-
-      links
-        .exit()
-        .transition()
-        .duration(duration)
-        .attr("d", d => collapse(root.x, root.y))
-        .remove();
-    }
-
-    function setupTimeline(orgs) {
-      orgs.forEach(function(d, i) {
-        d.index = i;
-      });
-
-      let ticks = d3
-        .select("#timeline")
-        .selectAll("g.tick")
-        .data(orgs, d => d.date);
-
-      ticks
-        .enter()
-        .append("g")
-        .attr("class", "tick")
-        .attr(
-          "transform",
-          d => "translate(" + xScale(dateParser(d.date)) + ",0)"
-        )
-        .append("circle")
-        .attr("r", 4)
-        .style("fill", "#fff")
-        .on("click", function(e, i) {
-          showOrg(i);
-        });
-    }
-
-    function updateTimeline() {
-      d3.select("#timeline")
-        .selectAll("g.tick")
-        .selectAll("circle")
-        .style("fill", d =>
-          d.date == currentOrg.date ? "lightsteelblue" : "#fff"
-        );
-    }
-
-    function collapse(x, y) {
-      let p = { x: x, y: y };
-      return diagonal({ source: p, target: p });
-    }
-
-    function countPeople(org) {
-      let c = 1;
-      for (const child of org.children) {
-        c += countPeople(child);
-      }
-      return c;
-    }
+      .call(d3.axisBottom(xScale));
 
     function showOrg(i) {
-      currentOrg = orgAtDates[i];
+      let org = orgAtDates[i];
 
-      showDateAndCount(currentOrg);
+      let h = d3.hierarchy(org);
+      h.x0 = height / 2;
+      h.y0 = 0;
 
-      let org = d3.hierarchy(currentOrg);
-      org.x0 = height / 2;
-      org.y0 = 0;
-
-      updateTree(tree(org), 750);
-      updateTimeline();
-    }
-
-    function showDateAndCount(org) {
-      let fmt = d3.timeFormat("%B %-d, %Y");
-      let count = countPeople(currentOrg);
-
-      dateLabel.text(fmt(dateParser(org.date)) + " (" + count + " people)");
-    }
-
-    function findCurrentOrgIndex(orgAtDates) {
-      let now = new Date();
-      let index = -1;
-      for (let i = 0; i < orgAtDates.length; i++) {
-        if (dateParser(orgAtDates[i].date) < now) {
-          index = i;
-        }
-      }
-      return index == -1 ? orgAtDates.length - 1 : index;
+      showDateAndCount(org, dateLabel);
+      updateTree(tree(h), 750, gTree);
+      updateTimeline(org);
+      return org;
     }
 
     function changeOrg(e) {
       let nOrgs = orgAtDates.length;
-
       if (e.keyCode == 39) {
-        showOrg((currentOrg.index + 1) % nOrgs);
+        currentOrg = showOrg((currentOrg.index + 1) % nOrgs);
       } else if (e.keyCode == 37) {
-        showOrg((((currentOrg.index - 1) % nOrgs) + nOrgs) % nOrgs);
+        currentOrg = showOrg(
+          (((currentOrg.index - 1) % nOrgs) + nOrgs) % nOrgs
+        );
       }
     }
 
-    setupTimeline(orgAtDates);
-    showOrg(findCurrentOrgIndex(orgAtDates));
+    setupTimeline(orgAtDates, xScale, height, showOrg);
+    let currentOrg = showOrg(findPresentOrgIndex(orgAtDates));
     document.addEventListener("keydown", changeOrg, false);
   }
 
-  document.addEventListener("DOMContentLoaded", go);
+  //
+  // Helper functions for rendering the org chart.
+  //
 
+  function findPresentOrgIndex(orgAtDates) {
+    let now = new Date();
+    let index = -1;
+    for (let i = 0; i < orgAtDates.length; i++) {
+      if (dateParser(orgAtDates[i].date) < now) {
+        index = i;
+      }
+    }
+    return index == -1 ? orgAtDates.length - 1 : index;
+  }
+
+  function countPeople(org) {
+    let c = 1;
+    for (const child of org.children) {
+      c += countPeople(child);
+    }
+    return c;
+  }
+
+  function showDateAndCount(org, label) {
+    let fmt = d3.timeFormat("%B %-d, %Y");
+    let count = countPeople(org);
+    label.text(fmt(dateParser(org.date)) + " (" + count + " people)");
+  }
+
+  function updateTree(root, duration, gTree) {
+    setupNodes(root, duration, gTree);
+    setupLinks(root, duration, gTree);
+  }
+
+  function updateTimeline(org) {
+    d3.select("#timeline")
+      .selectAll("g.tick")
+      .selectAll("circle")
+      .style("fill", d => (d.date == org.date ? "lightsteelblue" : "#fff"));
+  }
+
+  function setupNodes(root, duration, gTree) {
+    let nodeData = root.descendants();
+    nodeData.forEach(function(d) {
+      d.y = d.depth * 200;
+    });
+    let nodes = gTree.selectAll("g.node").data(nodeData, assignId);
+
+    let enter = nodes
+      .enter()
+      .append("g")
+      .attr("class", "node")
+      .attr("transform", d => "translate(" + root.y0 + "," + root.x0 + ")");
+
+    enter
+      .append("circle")
+      .attr("r", 1e-6)
+      .style("fill", d => (d._children ? "lightsteelblue" : "#fff"));
+
+    enter
+      .append("text")
+      .attr("dy", ".35em")
+      .attr("x", d => (d.children || d._children ? -10 : 10))
+      .attr("text-anchor", d => (d.children || d._children ? "end" : "start"))
+      .text(d => d.data.name);
+
+    let update = enter.merge(nodes);
+
+    update
+      .transition()
+      .duration(duration)
+      .attr("transform", d => "translate(" + d.y + "," + d.x + ")");
+
+    update.select("circle").attr("r", 4.5);
+
+    update
+      .select("text")
+      .attr("x", d => (d.children || d._children ? -10 : 10))
+      .attr("text-anchor", d => (d.children || d._children ? "end" : "start"))
+      .style("fill-opacity", 1);
+
+    nodes
+      .exit()
+      .transition()
+      .duration(duration)
+      .attr("transform", d => "translate(" + root.y + "," + root.x + ")")
+      .remove();
+
+    nodeData.forEach(function(d) {
+      d.x0 = d.x;
+      d.y0 = d.y;
+    });
+  }
+
+  function setupLinks(root, duration, gTree) {
+    let links = gTree
+      .selectAll("path.link")
+      .data(root.descendants().slice(1), d => d.id);
+
+    let enter = links
+      .enter()
+      .insert("path", "g")
+      .attr("class", "link")
+      .attr("d", d => collapse(root.x0, root.y0));
+
+    enter
+      .merge(links)
+      .transition()
+      .duration(duration)
+      .attr("d", d => diagonal({ source: d, target: d.parent }));
+
+    links
+      .exit()
+      .transition()
+      .duration(duration)
+      .attr("d", d => collapse(root.x, root.y))
+      .remove();
+  }
+
+  let diagonal = d3
+    .linkHorizontal()
+    .x(d => d.y)
+    .y(d => d.x);
+
+  function collapse(x, y) {
+    let p = { x: x, y: y };
+    return diagonal({ source: p, target: p });
+  }
+
+  function setupTimeline(orgAtDates, xScale, showOrg) {
+    orgAtDates.forEach(function(d, i) {
+      d.index = i;
+    });
+
+    let ticks = d3
+      .select("#timeline")
+      .selectAll("g.tick")
+      .data(orgAtDates, d => d.date);
+
+    ticks
+      .enter()
+      .append("g")
+      .attr("class", "tick")
+      .attr("transform", d => "translate(" + xScale(dateParser(d.date)) + ",0)")
+      .append("circle")
+      .attr("r", 4)
+      .style("fill", "#fff")
+      .on("click", (e, i) => showOrg(i));
+  }
+
+  document.addEventListener("DOMContentLoaded", function() {
+    renderOrgchart(Org.orgs(window.org_history));
+  });
 })();
