@@ -171,7 +171,7 @@
       }
     }
 
-    setupTimeline(orgAtDates, xScale, height, showOrg);
+    setupTimeline(orgAtDates, xScale, showOrg);
     let currentOrg = showOrg(findPresentOrgIndex(orgAtDates));
     document.addEventListener("keydown", changeOrg, false);
   }
